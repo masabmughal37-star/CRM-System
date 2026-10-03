@@ -1,0 +1,42 @@
+﻿# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Django
+*.log
+db.sqlite3
+db.sqlite3-*
+staticfiles/
+media/
+
+# Local / temporary files
+*.tmp
+*.bak
+*.backup
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# Database backups
+*.sqlite3
+*.sqlite3-*
+db.sqlite3.backup-companies-20261001
+
+# Backup files
+*.bak
+*.backup
+*.backup-*
+*.backup_*
