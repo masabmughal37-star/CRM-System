@@ -1,0 +1,40 @@
+const handleLogin = async (e) => {
+  e.preventDefault();
+
+  setLoading(true);
+  setErrorMsg('');
+
+  try {
+    const response = await API.post('auth/token/', {
+      email: username.trim(),
+      password,
+    });
+
+    const accessToken = response.data?.access;
+    const refreshToken = response.data?.refresh;
+
+    if (!accessToken) {
+      throw new Error('The server did not return an access token.');
+    }
+
+    localStorage.setItem('token', accessToken);
+    localStorage.setItem('access_token', accessToken);
+
+    if (refreshToken) {
+      localStorage.setItem('refresh_token', refreshToken);
+    }
+
+    setToken(accessToken);
+  } catch (err) {
+    console.error('Login failed:', err);
+
+    setErrorMsg(
+      err.response?.status === 401 ||
+      err.response?.status === 400
+        ? 'Login failed. Please check your credentials.'
+        : 'Unable to log in. Please check your connection and try again.'
+    );
+  } finally {
+    setLoading(false);
+  }
+};
