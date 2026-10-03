@@ -1,4 +1,6 @@
-﻿# Python
+﻿# =========================
+# Python / Django
+# =========================
 __pycache__/
 *.py[cod]
 *.pyo
@@ -16,27 +18,47 @@ env/
 # Django
 *.log
 db.sqlite3
-db.sqlite3-*
+*.sqlite3
+*.sqlite3-*
 staticfiles/
 media/
 
 # Local / temporary files
 *.tmp
-*.bak
-*.backup
-.DS_Store
-
-# IDE
-.vscode/
-.idea/
-
-# Database backups
-*.sqlite3
-*.sqlite3-*
-db.sqlite3.backup-companies-20261001
 
 # Backup files
 *.bak
 *.backup
 *.backup-*
 *.backup_*
+
+# IDE
+.vscode/
+.idea/
+.DS_Store
+
+# =========================
+# Node / React / Vite
+# =========================
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# npm / yarn / pnpm logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Editor / OS files
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Vite / local environment files
+.env.local
+.env.*.local

@@ -1,0 +1,782 @@
+﻿import React, { useCallback, useEffect, useState } from 'react';
+import API from './api';
+
+export default function MetadataManager({ type }) {
+  const isTags = type === 'tags';
+  const endpoint = isTags ? 'metadata/tags/' : 'metadata/lead-sources/';
+  const title = isTags ? 'Tags' : 'Lead Sources';
+
+  const [records, setRecords] = useState([]);
+  const [contacts, setContacts] = useState([]);
+  const [customers, setCustomers] = useState([]);
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [selectedContacts, setSelectedContacts] = useState([]);
+  const [selectedCustomers, setSelectedCustomers] = useState([]);
+  const [editingId, setEditingId] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+  const [showArchived, setShowArchived] = useState(false);
+  const [actionLoading, setActionLoading] = useState(null);
+  const [confirmAction, setConfirmAction] = useState(null);
+
+  const getFriendlyError = (err) => {
+    const data = err.response?.data;
+
+    if (data && typeof data === 'object') {
+      const nameErrors = data.name;
+
+      if (Array.isArray(nameErrors) && nameErrors.length > 0) {
+        const message = String(nameErrors[0]).toLowerCase();
+
+        if (message.includes('already exists')) {
+          return type === 'tags'
+            ? 'A tag with this name already exists. Please choose a different name.'
+            : 'A lead source with this name already exists. Please choose a different name.';
+        }
+
+        return String(nameErrors[0]);
+      }
+
+      if (data.detail) {
+        return String(data.detail);
+      }
+
+      if (Array.isArray(data.non_field_errors)) {
+        return data.non_field_errors.join(' ');
+      }
+
+      const firstField = Object.keys(data)[0];
+
+      if (firstField) {
+        const firstError = data[firstField];
+
+        if (Array.isArray(firstError)) {
+          return firstError.join(' ');
+        }
+
+        if (typeof firstError === 'string') {
+          return firstError;
+        }
+      }
+    }
+
+    if (err.message === 'Network Error') {
+      return 'Unable to connect to the server. Please check your connection and try again.';
+    }
+
+    return 'Something went wrong. Please try again.';
+  };
+
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    setError('');
+
+    try {
+      const [metadataResponse, contactsResponse, customersResponse] =
+        await Promise.all([
+          API.get(endpoint + (showArchived ? '?archived=true' : '')),
+          API.get('contacts/'),
+          API.get('customers/'),
+        ]);
+
+      const getRecords = (response) => {
+        const data = response.data;
+        return Array.isArray(data) ? data : (data.results || []);
+      };
+
+      setRecords(getRecords(metadataResponse));
+      setContacts(getRecords(contactsResponse));
+      setCustomers(getRecords(customersResponse));
+    } catch (err) {
+      setError(
+        getFriendlyError(err)
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, [endpoint, showArchived]);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  const resetForm = () => {
+    setName('');
+    setDescription('');
+    setSelectedContacts([]);
+    setSelectedCustomers([]);
+    setEditingId(null);
+    setMessage('');
+    setError('');
+  };
+
+  const startEdit = (record) => {
+    setEditingId(record.id);
+    setName(record.name || '');
+    setDescription(record.description || '');
+    setSelectedContacts((record.contacts || []).map(String));
+    setSelectedCustomers((record.customers || []).map(String));
+    setMessage('');
+    setError('');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const toggleSelection = (id, selected, setter) => {
+    const value = String(id);
+    setter((current) =>
+      selected
+        ? [...current, value]
+        : current.filter((item) => item !== value)
+    );
+  };
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+    setSaving(true);
+    setError('');
+    setMessage('');
+
+    const payload = {
+      name: name.trim(),
+      description: description.trim(),
+      contacts: selectedContacts.map(Number),
+      customers: selectedCustomers.map(Number),
+    };
+
+    try {
+      if (editingId !== null) {
+        await API.patch(endpoint + editingId + '/', payload);
+        setMessage(title + ' updated successfully.');
+      } else {
+        await API.post(endpoint, payload);
+        setMessage(title + ' created successfully.');
+      }
+
+      resetForm();
+      await loadData();
+    } catch (err) {
+      setError(
+        getFriendlyError(err)
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleArchiveRestore = (record) => {
+    setConfirmAction({
+      record,
+      action: showArchived ? 'restore' : 'archive',
+    });
+  };
+
+  const executeArchiveRestore = async () => {
+    if (!confirmAction || actionLoading !== null) return;
+
+    const { record, action } = confirmAction;
+    const isRestore = action === 'restore';
+
+    setActionLoading(`${action}-${record.id}`);
+    setError('');
+    setMessage('');
+    setConfirmAction(null);
+
+    try {
+      await API.post(`${endpoint}${record.id}/${action}/`);
+      setMessage(
+        `"${record.name}" ${isRestore ? 'restored' : 'archived'} successfully.`
+      );
+      if (editingId === record.id) resetForm();
+      await loadData();
+    } catch (err) {
+      setError(getFriendlyError(err));
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const getContactName = (contact) => {
+    const fullName = [
+      contact.first_name,
+      contact.last_name,
+    ].filter(Boolean).join(' ').trim();
+
+    return fullName || contact.name || contact.email || ('Contact #' + contact.id);
+  };
+
+  const getCustomerName = (customer) => {
+    const fullName = [
+      customer.first_name,
+      customer.last_name,
+    ].filter(Boolean).join(' ').trim();
+
+    return fullName || customer.name || customer.email || ('Customer #' + customer.id);
+  };
+
+  const cardStyle = {
+    background: 'var(--card-bg, #111827)',
+    border: '1px solid var(--border-color, #263244)',
+    borderRadius: '12px',
+    padding: '20px',
+    marginBottom: '20px',
+  };
+
+  const inputStyle = {
+    width: '100%',
+    boxSizing: 'border-box',
+    padding: '11px 12px',
+    borderRadius: '8px',
+    border: '1px solid #334155',
+    background: '#0F172A',
+    color: '#F8FAFC',
+    fontSize: '14px',
+  };
+
+  const buttonStyle = {
+    padding: '10px 16px',
+    border: 'none',
+    borderRadius: '8px',
+    background: '#4F46E5',
+    color: '#FFFFFF',
+    fontWeight: 600,
+    cursor: saving ? 'wait' : 'pointer',
+    opacity: saving ? 0.7 : 1,
+  };
+
+  return (
+    <div>
+      <section className="form-card" style={cardStyle}>
+        <h3 className="form-title">
+          {editingId !== null ? 'Edit ' : 'Create '} {title}
+        </h3>
+
+        <form onSubmit={handleSubmit}>
+          <div style={{ display: 'grid', gap: '14px' }}>
+            <input
+              style={inputStyle}
+              type="text"
+              placeholder={isTags ? 'Tag name' : 'Lead source name'}
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              maxLength={100}
+              required
+            />
+
+            <textarea
+              style={{ ...inputStyle, minHeight: '90px', resize: 'vertical' }}
+              placeholder="Description (optional)"
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
+            />
+          </div>
+
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+            gap: '18px',
+            marginTop: '20px',
+          }}>
+            <div>
+              <h4 style={{ margin: '0 0 10px' }}>Associate Contacts</h4>
+              {contacts.length === 0 && (
+                <p style={{ color: '#94A3B8', fontSize: '13px' }}>
+                  No contacts available.
+                </p>
+              )}
+              <div style={{ display: 'grid', gap: '9px', maxHeight: '220px', overflowY: 'auto' }}>
+                {contacts.map((contact) => (
+                  <label key={contact.id} style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '9px',
+                    fontSize: '13px',
+                    color: '#CBD5E1',
+                  }}>
+                    <input
+                      type="checkbox"
+                      checked={selectedContacts.includes(String(contact.id))}
+                      onChange={(event) => toggleSelection(
+                        contact.id,
+                        event.target.checked,
+                        setSelectedContacts
+                      )}
+                    />
+                    <span>{getContactName(contact)}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <h4 style={{ margin: '0 0 10px' }}>Associate Customers</h4>
+              {customers.length === 0 && (
+                <p style={{ color: '#94A3B8', fontSize: '13px' }}>
+                  No customers available.
+                </p>
+              )}
+              <div style={{ display: 'grid', gap: '9px', maxHeight: '220px', overflowY: 'auto' }}>
+                {customers.map((customer) => (
+                  <label key={customer.id} style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '9px',
+                    fontSize: '13px',
+                    color: '#CBD5E1',
+                  }}>
+                    <input
+                      type="checkbox"
+                      checked={selectedCustomers.includes(String(customer.id))}
+                      onChange={(event) => toggleSelection(
+                        customer.id,
+                        event.target.checked,
+                        setSelectedCustomers
+                      )}
+                    />
+                    <span>{getCustomerName(customer)}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {error && (
+            <p role="alert" style={{ color: '#F87171', whiteSpace: 'pre-wrap' }}>
+              {error}
+            </p>
+          )}
+
+          {message && (
+            <p role="status" style={{ color: '#34D399' }}>
+              {message}
+            </p>
+          )}
+
+          <div style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
+            <button type="submit" style={buttonStyle} disabled={saving}>
+              {saving ? 'Saving...' : editingId !== null ? 'Update ' + title : 'Create ' + title}
+            </button>
+
+            {editingId !== null && (
+              <button
+                type="button"
+                onClick={resetForm}
+                style={{
+                  ...buttonStyle,
+                  background: '#334155',
+                }}
+              >
+                Cancel
+              </button>
+            )}
+          </div>
+        </form>
+      </section>
+
+      <section className="form-card" style={cardStyle}>
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '12px',
+          marginBottom: '16px',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: '10px',
+            }}>
+              <h3 style={{ margin: 0, fontSize: '20px', fontWeight: 700 }}>
+                {title}
+              </h3>
+              <span style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                padding: '5px 10px',
+                borderRadius: '999px',
+                background: showArchived
+                  ? 'rgba(245, 158, 11, 0.12)'
+                  : 'rgba(16, 185, 129, 0.12)',
+                border: showArchived
+                  ? '1px solid rgba(245, 158, 11, 0.3)'
+                  : '1px solid rgba(16, 185, 129, 0.3)',
+                color: showArchived ? '#FBBF24' : '#34D399',
+                fontSize: '12px',
+                fontWeight: 700,
+                letterSpacing: '0.2px',
+              }}>
+                {showArchived ? 'Archived' : 'Active'}
+              </span>
+              <span style={{
+                color: '#94A3B8',
+                fontSize: '13px',
+                fontWeight: 600,
+              }}>
+                {records.length} records
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                if (editingId !== null) resetForm();
+                setShowArchived((current) => !current);
+                setMessage('');
+                setError('');
+              }}
+              style={{
+                ...buttonStyle,
+                padding: '9px 13px',
+                border: '1px solid #475569',
+                borderRadius: '9px',
+                background: showArchived ? '#065F46' : '#263449',
+                color: '#E2E8F0',
+                fontSize: '13px',
+                whiteSpace: 'nowrap',
+                transition: 'background 0.2s ease',
+              }}
+              disabled={loading || actionLoading !== null}
+            >
+              {showArchived ? 'View Active' : 'View Archived'}
+            </button>
+          </div>
+          <button
+            type="button"
+            onClick={loadData}
+            style={{ ...buttonStyle, background: '#334155' }}
+            disabled={loading || actionLoading !== null}
+          >
+            Refresh
+          </button>
+        </div>
+
+        {loading ? (
+          <p style={{ color: '#94A3B8' }}>Loading {title.toLowerCase()}...</p>
+        ) : records.length === 0 ? (
+          <p style={{ color: '#94A3B8' }}>No {title.toLowerCase()} found.</p>
+        ) : (
+          <div className="table-container">
+            <table
+              className="data-table mobile-responsive-cards"
+              style={{
+                width: '100%',
+                tableLayout: 'fixed',
+                borderCollapse: 'separate',
+                borderSpacing: 0,
+              }}
+            >
+              <colgroup>
+                <col style={{ width: '21%' }} />
+                <col style={{ width: '34%' }} />
+                <col style={{ width: '12%' }} />
+                <col style={{ width: '14%' }} />
+                <col style={{ width: '19%' }} />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th style={{ textAlign: 'left', padding: '16px 20px' }}>NAME</th>
+                  <th style={{ textAlign: 'left', padding: '16px 20px' }}>DESCRIPTION</th>
+                  <th style={{ textAlign: 'center', padding: '16px 8px' }}>CONTACTS</th>
+                  <th style={{ textAlign: 'center', padding: '16px 8px' }}>CUSTOMERS</th>
+                  <th style={{ textAlign: 'center', padding: '16px 8px' }}>ACTION</th>
+                </tr>
+              </thead>
+              <tbody>
+                {records.map((record) => (
+                  <tr key={record.id}>
+                    <td
+                      data-label="NAME"
+                      style={{
+                        fontWeight: 600,
+                        textAlign: 'left',
+                        padding: '20px',
+                        verticalAlign: 'middle',
+                        overflowWrap: 'anywhere',
+                      }}
+                    >
+                      {record.name}
+                    </td>
+                    <td
+                      data-label="DESCRIPTION"
+                      style={{
+                        textAlign: 'left',
+                        padding: '20px',
+                        verticalAlign: 'middle',
+                        overflowWrap: 'anywhere',
+                        lineHeight: 1.5,
+                      }}
+                    >
+                      {record.description || '—'}
+                    </td>
+                    <td
+                      data-label="CONTACTS"
+                      style={{
+                        textAlign: 'center',
+                        padding: '20px 8px',
+                        verticalAlign: 'middle',
+                        fontVariantNumeric: 'tabular-nums',
+                      }}
+                    >
+                      {(record.contacts || []).length}
+                    </td>
+                    <td
+                      data-label="CUSTOMERS"
+                      style={{
+                        textAlign: 'center',
+                        padding: '20px 8px',
+                        verticalAlign: 'middle',
+                        fontVariantNumeric: 'tabular-nums',
+                      }}
+                    >
+                      {(record.customers || []).length}
+                    </td>
+                    <td
+                      data-label="ACTION"
+                      style={{
+                        minWidth: 0,
+                        textAlign: 'center',
+                        padding: '20px 8px',
+                        verticalAlign: 'middle',
+                      }}
+                    >
+                      <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexWrap: 'wrap',
+                        gap: '8px',
+                      }}>
+                        {showArchived ? (
+                          <button
+                            type="button"
+                            onClick={() => handleArchiveRestore(record)}
+                            disabled={actionLoading !== null}
+                            style={{
+                              padding: '7px 11px',
+                              borderRadius: '7px',
+                              border: '1px solid rgba(52, 211, 153, 0.3)',
+                              background: 'rgba(16, 185, 129, 0.1)',
+                              color: '#34D399',
+                              fontSize: '12px',
+                              fontWeight: 600,
+                              cursor: actionLoading !== null ? 'wait' : 'pointer',
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            {actionLoading === `restore-${record.id}` ? 'Restoring...' : 'Restore'}
+                          </button>
+                        ) : (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => startEdit(record)}
+                              disabled={actionLoading !== null}
+                              style={{
+                                padding: '7px 11px',
+                                borderRadius: '7px',
+                                border: '1px solid rgba(251, 191, 36, 0.3)',
+                                background: 'rgba(245, 158, 11, 0.1)',
+                                color: '#FBBF24',
+                                fontSize: '12px',
+                                fontWeight: 600,
+                                cursor: actionLoading !== null ? 'wait' : 'pointer',
+                              }}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleArchiveRestore(record)}
+                              disabled={actionLoading !== null}
+                              style={{
+                                padding: '7px 11px',
+                                borderRadius: '7px',
+                                border: '1px solid rgba(248, 113, 113, 0.3)',
+                                background: 'rgba(239, 68, 68, 0.08)',
+                                color: '#F87171',
+                                fontSize: '12px',
+                                fontWeight: 600,
+                                cursor: actionLoading !== null ? 'wait' : 'pointer',
+                              }}
+                            >
+                              {actionLoading === `archive-${record.id}` ? 'Archiving...' : 'Archive'}
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+      {confirmAction && (
+        <div
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && actionLoading === null) {
+              setConfirmAction(null);
+            }
+          }}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 9999,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '20px',
+            background: 'rgba(2, 6, 23, 0.76)',
+            backdropFilter: 'blur(5px)',
+          }}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="metadata-confirm-title"
+            aria-describedby="metadata-confirm-description"
+            onMouseDown={(event) => event.stopPropagation()}
+            style={{
+              width: '100%',
+              maxWidth: '440px',
+              boxSizing: 'border-box',
+              padding: '26px',
+              borderRadius: '16px',
+              border: '1px solid #334155',
+              background: '#111827',
+              color: '#F8FAFC',
+              boxShadow: '0 24px 70px rgba(0, 0, 0, 0.45)',
+            }}
+          >
+            <div style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: '15px',
+              marginBottom: '22px',
+            }}>
+              <div style={{
+                flexShrink: 0,
+                width: '44px',
+                height: '44px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderRadius: '12px',
+                background: confirmAction.action === 'restore'
+                  ? 'rgba(16, 185, 129, 0.14)'
+                  : 'rgba(245, 158, 11, 0.14)',
+                color: confirmAction.action === 'restore' ? '#34D399' : '#FBBF24',
+                fontSize: '23px',
+                fontWeight: 700,
+              }}>
+                {confirmAction.action === 'restore' ? '?' : '!'}
+              </div>
+
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <h3
+                  id="metadata-confirm-title"
+                  style={{
+                    margin: '1px 0 8px',
+                    fontSize: '19px',
+                    lineHeight: 1.35,
+                    fontWeight: 700,
+                    color: '#F8FAFC',
+                  }}
+                >
+                  {confirmAction.action === 'restore'
+                    ? 'Restore this record?'
+                    : 'Archive this record?'}
+                </h3>
+
+                <p
+                  id="metadata-confirm-description"
+                  style={{
+                    margin: 0,
+                    color: '#CBD5E1',
+                    fontSize: '14px',
+                    lineHeight: 1.65,
+                    overflowWrap: 'anywhere',
+                  }}
+                >
+                  {confirmAction.action === 'restore'
+                    ? 'This record will become active and appear in your active list again.'
+                    : 'This record will be moved to Archived. You can restore it whenever you need.'}
+                </p>
+              </div>
+            </div>
+
+            <div style={{
+              padding: '12px 14px',
+              marginBottom: '24px',
+              borderRadius: '9px',
+              border: '1px solid #293548',
+              background: '#0B1220',
+              color: '#E2E8F0',
+              fontSize: '14px',
+              fontWeight: 600,
+              overflowWrap: 'anywhere',
+            }}>
+              {confirmAction.record.name}
+            </div>
+
+            <div style={{
+              display: 'flex',
+              justifyContent: 'flex-end',
+              flexWrap: 'wrap',
+              gap: '10px',
+            }}>
+              <button
+                type="button"
+                onClick={() => setConfirmAction(null)}
+                disabled={actionLoading !== null}
+                style={{
+                  padding: '10px 17px',
+                  borderRadius: '9px',
+                  border: '1px solid #475569',
+                  background: '#1E293B',
+                  color: '#E2E8F0',
+                  fontSize: '14px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                onClick={executeArchiveRestore}
+                disabled={actionLoading !== null}
+                style={{
+                  padding: '10px 17px',
+                  borderRadius: '9px',
+                  border: '1px solid',
+                  borderColor: confirmAction.action === 'restore'
+                    ? '#059669'
+                    : '#DC2626',
+                  background: confirmAction.action === 'restore'
+                    ? '#047857'
+                    : '#B91C1C',
+                  color: '#FFFFFF',
+                  fontSize: '14px',
+                  fontWeight: 700,
+                  cursor: actionLoading !== null ? 'wait' : 'pointer',
+                  opacity: actionLoading !== null ? 0.7 : 1,
+                }}
+              >
+                {confirmAction.action === 'restore'
+                  ? 'Restore Record'
+                  : 'Archive Record'}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+    </div>
+  );
+}
