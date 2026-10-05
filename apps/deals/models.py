@@ -1,4 +1,4 @@
-from django.db import models
+﻿from django.db import models
 from django.conf import settings
 from apps.core.models import TimeStampedModel
 from apps.customers.models import Customer
@@ -32,4 +32,4 @@ class Deal(TimeStampedModel):
     notes = models.TextField(blank=True, null=True)
 
     def __str__(self):
-        return f"{self.title} - {self.customer.first_name} ({self.get_stage_display()})"
+        return f"{self.title} - {self.customer.name} ({self.get_stage_display()})"
